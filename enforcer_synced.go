@@ -22,8 +22,6 @@ import (
 	"github.com/casbin/govaluate"
 
 	"github.com/casbin/casbin/v2/persist"
-	"github.com/casbin/casbin/v2/rbac"
-	defaultrolemanager "github.com/casbin/casbin/v2/rbac/default-role-manager"
 )
 
 // SyncedEnforcer wraps Enforcer and provides synchronized access.
@@ -117,48 +115,18 @@ func (e *SyncedEnforcer) ClearPolicy() {
 
 // LoadPolicy reloads the policy from file/database.
 func (e *SyncedEnforcer) LoadPolicy() error {
-	e.m.Lock()
-	defer e.m.Unlock()
-	return e.Enforcer.LoadPolicy()
-}
-
-// LoadPolicyFast is not blocked when adapter calls LoadPolicy.
-func (e *SyncedEnforcer) LoadPolicyFast() error {
 	e.m.RLock()
-	newModel := e.model.Copy()
+	newModel, err := e.loadPolicyFromAdapter(e.model)
 	e.m.RUnlock()
-
-	newModel.ClearPolicy()
-	newRmMap := map[string]rbac.RoleManager{}
-	var err error
-
-	if err = e.adapter.LoadPolicy(newModel); err != nil && err.Error() != "invalid file path, file path cannot be empty" {
+	if err != nil {
 		return err
 	}
-
-	if err = newModel.SortPoliciesBySubjectHierarchy(); err != nil {
-		return err
-	}
-
-	if err = newModel.SortPoliciesByPriority(); err != nil {
-		return err
-	}
-
-	if e.autoBuildRoleLinks {
-		for ptype := range newModel["g"] {
-			newRmMap[ptype] = defaultrolemanager.NewRoleManager(10)
-		}
-		err = newModel.BuildRoleLinks(newRmMap)
-		if err != nil {
-			return err
-		}
-	}
-
-	// reduce the lock range
 	e.m.Lock()
-	defer e.m.Unlock()
-	e.model = newModel
-	e.rmMap = newRmMap
+	err = e.applyModifiedModel(newModel)
+	e.m.Unlock()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -233,126 +201,126 @@ func (e *SyncedEnforcer) BatchEnforceWithMatcher(matcher string, requests [][]in
 }
 
 // GetAllSubjects gets the list of subjects that show up in the current policy.
-func (e *SyncedEnforcer) GetAllSubjects() []string {
+func (e *SyncedEnforcer) GetAllSubjects() ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllSubjects()
 }
 
 // GetAllNamedSubjects gets the list of subjects that show up in the current named policy.
-func (e *SyncedEnforcer) GetAllNamedSubjects(ptype string) []string {
+func (e *SyncedEnforcer) GetAllNamedSubjects(ptype string) ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllNamedSubjects(ptype)
 }
 
 // GetAllObjects gets the list of objects that show up in the current policy.
-func (e *SyncedEnforcer) GetAllObjects() []string {
+func (e *SyncedEnforcer) GetAllObjects() ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllObjects()
 }
 
 // GetAllNamedObjects gets the list of objects that show up in the current named policy.
-func (e *SyncedEnforcer) GetAllNamedObjects(ptype string) []string {
+func (e *SyncedEnforcer) GetAllNamedObjects(ptype string) ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllNamedObjects(ptype)
 }
 
 // GetAllActions gets the list of actions that show up in the current policy.
-func (e *SyncedEnforcer) GetAllActions() []string {
+func (e *SyncedEnforcer) GetAllActions() ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllActions()
 }
 
 // GetAllNamedActions gets the list of actions that show up in the current named policy.
-func (e *SyncedEnforcer) GetAllNamedActions(ptype string) []string {
+func (e *SyncedEnforcer) GetAllNamedActions(ptype string) ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllNamedActions(ptype)
 }
 
 // GetAllRoles gets the list of roles that show up in the current policy.
-func (e *SyncedEnforcer) GetAllRoles() []string {
+func (e *SyncedEnforcer) GetAllRoles() ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllRoles()
 }
 
 // GetAllNamedRoles gets the list of roles that show up in the current named policy.
-func (e *SyncedEnforcer) GetAllNamedRoles(ptype string) []string {
+func (e *SyncedEnforcer) GetAllNamedRoles(ptype string) ([]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetAllNamedRoles(ptype)
 }
 
 // GetPolicy gets all the authorization rules in the policy.
-func (e *SyncedEnforcer) GetPolicy() [][]string {
+func (e *SyncedEnforcer) GetPolicy() ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetPolicy()
 }
 
 // GetFilteredPolicy gets all the authorization rules in the policy, field filters can be specified.
-func (e *SyncedEnforcer) GetFilteredPolicy(fieldIndex int, fieldValues ...string) [][]string {
+func (e *SyncedEnforcer) GetFilteredPolicy(fieldIndex int, fieldValues ...string) ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetFilteredPolicy(fieldIndex, fieldValues...)
 }
 
 // GetNamedPolicy gets all the authorization rules in the named policy.
-func (e *SyncedEnforcer) GetNamedPolicy(ptype string) [][]string {
+func (e *SyncedEnforcer) GetNamedPolicy(ptype string) ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetNamedPolicy(ptype)
 }
 
 // GetFilteredNamedPolicy gets all the authorization rules in the named policy, field filters can be specified.
-func (e *SyncedEnforcer) GetFilteredNamedPolicy(ptype string, fieldIndex int, fieldValues ...string) [][]string {
+func (e *SyncedEnforcer) GetFilteredNamedPolicy(ptype string, fieldIndex int, fieldValues ...string) ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetFilteredNamedPolicy(ptype, fieldIndex, fieldValues...)
 }
 
 // GetGroupingPolicy gets all the role inheritance rules in the policy.
-func (e *SyncedEnforcer) GetGroupingPolicy() [][]string {
+func (e *SyncedEnforcer) GetGroupingPolicy() ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetGroupingPolicy()
 }
 
 // GetFilteredGroupingPolicy gets all the role inheritance rules in the policy, field filters can be specified.
-func (e *SyncedEnforcer) GetFilteredGroupingPolicy(fieldIndex int, fieldValues ...string) [][]string {
+func (e *SyncedEnforcer) GetFilteredGroupingPolicy(fieldIndex int, fieldValues ...string) ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetFilteredGroupingPolicy(fieldIndex, fieldValues...)
 }
 
 // GetNamedGroupingPolicy gets all the role inheritance rules in the policy.
-func (e *SyncedEnforcer) GetNamedGroupingPolicy(ptype string) [][]string {
+func (e *SyncedEnforcer) GetNamedGroupingPolicy(ptype string) ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetNamedGroupingPolicy(ptype)
 }
 
 // GetFilteredNamedGroupingPolicy gets all the role inheritance rules in the policy, field filters can be specified.
-func (e *SyncedEnforcer) GetFilteredNamedGroupingPolicy(ptype string, fieldIndex int, fieldValues ...string) [][]string {
+func (e *SyncedEnforcer) GetFilteredNamedGroupingPolicy(ptype string, fieldIndex int, fieldValues ...string) ([][]string, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.GetFilteredNamedGroupingPolicy(ptype, fieldIndex, fieldValues...)
 }
 
 // HasPolicy determines whether an authorization rule exists.
-func (e *SyncedEnforcer) HasPolicy(params ...interface{}) bool {
+func (e *SyncedEnforcer) HasPolicy(params ...interface{}) (bool, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.HasPolicy(params...)
 }
 
 // HasNamedPolicy determines whether a named authorization rule exists.
-func (e *SyncedEnforcer) HasNamedPolicy(ptype string, params ...interface{}) bool {
+func (e *SyncedEnforcer) HasNamedPolicy(ptype string, params ...interface{}) (bool, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.HasNamedPolicy(ptype, params...)
@@ -493,14 +461,14 @@ func (e *SyncedEnforcer) RemoveFilteredNamedPolicy(ptype string, fieldIndex int,
 }
 
 // HasGroupingPolicy determines whether a role inheritance rule exists.
-func (e *SyncedEnforcer) HasGroupingPolicy(params ...interface{}) bool {
+func (e *SyncedEnforcer) HasGroupingPolicy(params ...interface{}) (bool, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.HasGroupingPolicy(params...)
 }
 
 // HasNamedGroupingPolicy determines whether a named role inheritance rule exists.
-func (e *SyncedEnforcer) HasNamedGroupingPolicy(ptype string, params ...interface{}) bool {
+func (e *SyncedEnforcer) HasNamedGroupingPolicy(ptype string, params ...interface{}) (bool, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.HasNamedGroupingPolicy(ptype, params...)
